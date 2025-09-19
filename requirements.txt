@@ -1,0 +1,13 @@
+streamlit
+pandas
+python-docx
+python-pptx
+sentence-transformers
+faiss-cpu
+anthropic
+pdf2image
+easyocr
+numpy
+python-dotenv
+PyPDF2
+openpyxl
