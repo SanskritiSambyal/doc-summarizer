@@ -10,7 +10,6 @@ from pptx import Presentation
 from sentence_transformers import SentenceTransformer
 import faiss
 from anthropic import Anthropic, APIStatusError
-import numpy as np
 from PyPDF2 import PdfReader
 from dotenv import load_dotenv
 
@@ -128,7 +127,6 @@ def batch_summarize(text, batch_size=5):
     summaries = []
     for i in range(0, len(chunks), batch_size):
         batch = "\n\n".join(chunks[i:i + batch_size])
-        
         response = query_claude(
             client,
             "claude-opus-4-1-20250805",
@@ -151,79 +149,170 @@ def batch_summarize(text, batch_size=5):
 # Streamlit UI
 # ---------------------------
 st.set_page_config(page_title="AI Document Summarizer", layout="wide")
-st.title("📄 AI-Powered Document Summarizer (Claude + RAG)")
 
-st.markdown('<p style="font-size:18px;">Upload your docs and get concise summaries or answers using AI with context-aware search.</p>', unsafe_allow_html=True)
+# ---------- Clean Styling ----------
+st.markdown("""
+<style>
+body, .stApp, .stTextInput>div>div>input {
+    font-size: 17px;
+}
+.compact-label {
+    font-weight: 500;
+    margin-top: 0px;
+    margin-bottom: 4px;
+}
+.output-box {
+    background-color: #f9f9f9;
+    padding: 15px;
+    border-radius: 10px;
+    margin-top: 16px;
+    font-size: 16px;
+    line-height: 1.5;
+}
+.output-box h1, .output-box h2, .output-box h3 {
+    font-size: 18px !important;
+    font-weight: 600;
+    margin-top: 8px;
+    margin-bottom: 6px;
+}
+.output-box p {
+    margin: 4px 0;
+    font-size: 16px;
+}
+.stSelectbox>div>div>div, .stTextInput>div {
+    margin-top: 0px !important;
+    margin-bottom: 4px !important;
+}
+.stButton>button {
+    width: 100%;
+}
+</style>
+""", unsafe_allow_html=True)
 
-uploaded_file = st.file_uploader(
-    "Upload a document (PDF, DOCX, XLSX, CSV, PPTX, TXT)",
-    type=["pdf", "docx", "xlsx", "csv", "pptx", "txt"],
-    accept_multiple_files=False
-)
+st.markdown("""
+<style>
+h1 {
+    margin-top: -70px !important;
+    margin-bottom: 12px !important;
+}
+</style>
+""", unsafe_allow_html=True)
 
-if uploaded_file:
-    file_bytes = uploaded_file.read()
-    text = extract_and_cache_text(file_bytes, uploaded_file.name)
-    ext = uploaded_file.name.split(".")[-1].lower()
+st.title("📄 AI-Powered Document Summarizer & Chatbot (Claude + RAG)")
 
-    if text is None:
-        st.warning(f"⚠️ OCR is disabled on Streamlit Cloud. Please upload documents with extractable text.")
-    else:
-        messages = {
-            "pdf": "✅ PDF processed successfully!",
-            "docx": "✅ Word document processed successfully!",
-            "xlsx": "✅ Spreadsheet processed successfully!",
-            "csv": "✅ Spreadsheet processed successfully!",
-            "pptx": "✅ Presentation processed successfully!",
-            "txt": "✅ Text file processed successfully!"
-        }
-        st.success(messages.get(ext, "✅ Document processed successfully!"))
+# ---------- Layout Columns ----------
+col_sidebar, col_main = st.columns([1, 3])
 
-        # Build FAISS index
-        chunks, index = build_faiss_index(text)
-        st.session_state.chunks = chunks
-        st.session_state.index = index
-        st.session_state.full_text = text
+# ---------- Sidebar ----------
+with col_sidebar:
+    st.markdown('<div class="compact-label">Upload Document</div>', unsafe_allow_html=True)
+    uploaded_file = st.file_uploader(
+        "file_uploader",
+        type=["pdf","docx","xlsx","csv","pptx","txt"],
+        label_visibility="collapsed"
+    )
 
-        # ---------------------------
-        # Mode Selection UI
-        # ---------------------------
-        st.markdown('<p style="font-size:18px;">What would you like to do?</p>', unsafe_allow_html=True)
-        mode_options = ["💬 Ask a Question", "📝 Get Summary"]
-        selected_mode = st.selectbox("", mode_options)
+    text_extracted = False
+    if uploaded_file:
+        file_bytes = uploaded_file.read()
+        text = extract_and_cache_text(file_bytes, uploaded_file.name)
+        if text:
+            text_extracted = True
+            chunks, index = build_faiss_index(text)
+            st.session_state.chunks = chunks
+            st.session_state.index = index
+            st.session_state.full_text = text
 
-        # Display selected mode
-        st.markdown(f"**Selected Mode:** {selected_mode}")
+            ext = uploaded_file.name.split(".")[-1].lower()
+            messages = {
+                "pdf": "✅ PDF processed successfully!",
+                "docx": "✅ Word document processed successfully!",
+                "xlsx": "✅ Spreadsheet processed successfully!",
+                "csv": "✅ Spreadsheet processed successfully!",
+                "pptx": "✅ Presentation processed successfully!",
+                "txt": "✅ Text file processed successfully!"
+            }
+            st.success(messages.get(ext, "✅ Document processed successfully!"))
+        else:
+            st.warning("⚠️ OCR is disabled on Streamlit Cloud. Please upload documents with extractable text.")
 
-        # ---------------------------
-        # Q&A Mode
-        # ---------------------------
-        if selected_mode == "💬 Ask a Question":
-            user_query = st.text_input(label='', placeholder='🔍 Type your question here:')
-            st.markdown('<p style="font-size:16px;">Type your question here:</p>', unsafe_allow_html=True)
-            if st.button("Ask Now"):
-                if user_query.strip():
-                    ext_name = uploaded_file.name.split(".")[-1].upper()
-                    with st.spinner(f"🧠 Searching for answers in your {ext_name}..."):
-                        context_chunks = search_chunks(user_query, st.session_state.chunks, st.session_state.index)
-                        context_text = "\n".join(context_chunks)
-                        response = query_claude(
-                            client,
-                            "claude-opus-4-1-20250805",
-                            messages=[{"role": "user", "content": f"Context:\n{context_text}\n\nQuestion: {user_query}"}],
-                            system="Answer based only on the provided context."
+    # Show mode selector only if text was extracted
+    if text_extracted:
+        st.markdown('<div class="compact-label">Select Mode</div>', unsafe_allow_html=True)
+        selected_mode = st.selectbox(
+            "mode_selector",
+            ["💬 Ask a Question", "📝 Get Summary"],
+            key="selected_mode",
+            label_visibility="collapsed"
+        )
+
+        # ---------- Collapsible History ----------
+        with st.expander("🕘 History"):
+            if "qa_history" not in st.session_state:
+                st.session_state.qa_history = []
+            if "summary_history" not in st.session_state:
+                st.session_state.summary_history = []
+
+            # Q&A History
+            with st.expander("🗨️ Q&A History"):
+                if st.session_state.qa_history:
+                    for entry in reversed(st.session_state.qa_history[-5:]):
+                        st.markdown(
+                            f'<div class="output-box"><b>Q:</b> {entry["query"]}<br><b>A:</b> {entry["answer"]}</div>',
+                            unsafe_allow_html=True
                         )
-                        if response:
-                            st.subheader("🤖 Answer")
-                            st.write(response)
+                else:
+                    st.info("No Q&A history yet.")
 
-        # ---------------------------
-        # Summarization Mode
-        # ---------------------------
+            # Summary History
+            with st.expander("📝 Summary History"):
+                if st.session_state.summary_history:
+                    for i, s in enumerate(reversed(st.session_state.summary_history[-5:]), 1):
+                        st.markdown(
+                            f'<div class="output-box"><b>Summary {i}:</b><br>{s}</div>',
+                            unsafe_allow_html=True
+                        )
+                else:
+                    st.info("No summaries yet.")
+# ---------- Main Column ----------
+with col_main:
+    if text_extracted:
+        # ---------- Q&A ----------
+        if selected_mode == "💬 Ask a Question":
+            st.markdown('<div class="compact-label">Your Question</div>', unsafe_allow_html=True)
+            user_query = st.text_input(
+                "question_input",
+                placeholder="Type your question here...",
+                label_visibility="collapsed"
+            )
+
+            ask_disabled = user_query.strip() == ""
+            col1, col2 = st.columns([0.25, 0.75])
+            with col1:
+                ask_clicked = st.button("Ask Now", disabled=ask_disabled)
+
+            if ask_clicked:
+                with st.spinner(f"🧠 Searching for answers in your {ext}..."):
+                    context_chunks = search_chunks(user_query, st.session_state.chunks, st.session_state.index)
+                    context_text = "\n".join(context_chunks)
+                    response = query_claude(
+                        client,
+                        "claude-opus-4-1-20250805",
+                        messages=[{"role": "user", "content": f"Context:\n{context_text}\n\nQuestion: {user_query}"}],
+                        system="Answer based only on the provided context."
+                    )
+                if response:
+                    st.session_state.qa_history.append({"query": user_query, "answer": response})
+                    st.markdown(f'<div class="output-box"><b>🤖 Answer:</b><br>{response}</div>', unsafe_allow_html=True)
+
+        # ---------- Summary ----------
         elif selected_mode == "📝 Get Summary":
-            if st.button("Generate Summary"):
-                ext_name = uploaded_file.name.split(".")[-1].upper()
-                with st.spinner(f"📄 Creating a concise summary of your {ext_name}..."):
+            col1, col2 = st.columns([0.25, 0.75])
+            with col1:
+                summary_clicked = st.button("Generate Summary")
+
+            if summary_clicked:
+                with st.spinner(f"📄 Creating a concise summary of your {ext}..."):
                     summary = batch_summarize(st.session_state.full_text)
-                    st.subheader("📌 Document Summary")
-                    st.write(summary)
+                    st.session_state.summary_history.append(summary)
+                    st.markdown(f'<div class="output-box"><b>📌 Document Summary:</b><br>{summary}</div>', unsafe_allow_html=True)
