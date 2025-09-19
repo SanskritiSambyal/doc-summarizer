@@ -19,8 +19,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-os.environ["HF_TOKEN"] = os.getenv("HF_TOKEN", "")
-
 # ---------------------------
 # API Key
 # ---------------------------
@@ -230,4 +228,3 @@ if "chunks" in st.session_state and st.session_state.chunks:
                 summary = batch_summarize(st.session_state.full_text)
                 st.subheader("📌 Document Summary")
                 st.write(summary)
-
