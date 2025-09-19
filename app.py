@@ -184,38 +184,40 @@ if uploaded_file:
         st.session_state.index = index
         st.session_state.full_text = text
 
-        # Choose mode - user-friendly layout
-        st.markdown("<h4 style='font-size:22px;'>What would you like to do?</h4>", unsafe_allow_html=True)
-        col1, col2 = st.columns(2, gap="large")
+        # ---------------------------
+        # Mode Selection UI
+        # ---------------------------
+        mode_options = ["💬 Ask a Question", "📝 Get Summary"]
+        selected_mode = st.selectbox("What would you like to do?", mode_options)
 
-        with col1:
-            if st.button("💬 Ask a Question"):
-                st.session_state.selected_mode = "Q&A"
+        # Display selected mode
+        st.markdown(f"**Selected Mode:** {selected_mode}")
 
-        with col2:
-            if st.button("📝 Get Summary"):
-                st.session_state.selected_mode = "Summarization"
-
-        selected_mode = st.session_state.get("selected_mode", None)
-
-        if selected_mode == "Q&A":
+        # ---------------------------
+        # Q&A Mode
+        # ---------------------------
+        if selected_mode == "💬 Ask a Question":
             user_query = st.text_input("🔍 Type your question here:")
-            if st.button("Ask Now") and user_query:
-                ext_name = uploaded_file.name.split(".")[-1].upper()
-                with st.spinner(f"🧠 Searching for answers in your {ext_name}..."):
-                    context_chunks = search_chunks(user_query, st.session_state.chunks, st.session_state.index)
-                    context_text = "\n".join(context_chunks)
-                    response = query_claude(
-                        client,
-                        "claude-opus-4-1-20250805",
-                        messages=[{"role": "user", "content": f"Context:\n{context_text}\n\nQuestion: {user_query}"}],
-                        system="Answer based only on the provided context."
-                    )
-                    if response:
-                        st.subheader("🤖 Answer")
-                        st.write(response)
+            if st.button("Ask Now"):
+                if user_query.strip():
+                    ext_name = uploaded_file.name.split(".")[-1].upper()
+                    with st.spinner(f"🧠 Searching for answers in your {ext_name}..."):
+                        context_chunks = search_chunks(user_query, st.session_state.chunks, st.session_state.index)
+                        context_text = "\n".join(context_chunks)
+                        response = query_claude(
+                            client,
+                            "claude-opus-4-1-20250805",
+                            messages=[{"role": "user", "content": f"Context:\n{context_text}\n\nQuestion: {user_query}"}],
+                            system="Answer based only on the provided context."
+                        )
+                        if response:
+                            st.subheader("🤖 Answer")
+                            st.write(response)
 
-        elif selected_mode == "Summarization":
+        # ---------------------------
+        # Summarization Mode
+        # ---------------------------
+        elif selected_mode == "📝 Get Summary":
             if st.button("Generate Summary"):
                 ext_name = uploaded_file.name.split(".")[-1].upper()
                 with st.spinner(f"📄 Creating a concise summary of your {ext_name}..."):
