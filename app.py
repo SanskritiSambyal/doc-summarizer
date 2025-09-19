@@ -179,38 +179,39 @@ if uploaded_file:
     file_bytes = uploaded_file.read()
     text = extract_and_cache_text(file_bytes, uploaded_file.name)
 
-    # If PDF had no extractable text
+    # If document has no extractable text
     if text is None:
-        st.warning("⚠️ OCR is disabled on Streamlit Cloud. Please upload docs with extractable text.")
+        st.warning("⚠️ OCR is disabled on Streamlit Cloud. Please upload documents with extractable text.")
     else:
+        # Build FAISS index
         chunks, index = build_faiss_index(text)
         st.session_state.chunks = chunks
         st.session_state.index = index
         st.session_state.full_text = text
         st.success("✅ Document processed and indexed successfully!")
 
-if "chunks" in st.session_state and st.session_state.chunks:
-    mode = st.radio("Choose mode:", ["Q&A", "Summarization"])
+        # Show modes only if text exists
+        mode = st.radio("Choose mode:", ["Q&A", "Summarization"])
 
-    if mode == "Q&A":
-        user_query = st.text_input("🔍 Ask a question about your document:")
-        if st.button("Ask") and user_query:
-            with st.spinner("Thinking..."):
-                context_chunks = search_chunks(user_query, st.session_state.chunks, st.session_state.index)
-                context_text = "\n".join(context_chunks)
-                response = query_claude(
-                    client,
-                    "claude-opus-4-1-20250805",
-                    messages=[{"role": "user", "content": f"Context:\n{context_text}\n\nQuestion: {user_query}"}],
-                    system="Answer based only on the provided context."
-                )
-                if response:
-                    st.subheader("🤖 Answer")
-                    st.write(response)
+        if mode == "Q&A":
+            user_query = st.text_input("🔍 Ask a question about your document:")
+            if st.button("Ask") and user_query:
+                with st.spinner("Thinking..."):
+                    context_chunks = search_chunks(user_query, st.session_state.chunks, st.session_state.index)
+                    context_text = "\n".join(context_chunks)
+                    response = query_claude(
+                        client,
+                        "claude-opus-4-1-20250805",
+                        messages=[{"role": "user", "content": f"Context:\n{context_text}\n\nQuestion: {user_query}"}],
+                        system="Answer based only on the provided context."
+                    )
+                    if response:
+                        st.subheader("🤖 Answer")
+                        st.write(response)
 
-    elif mode == "Summarization":
-        if st.button("Summarize Document"):
-            with st.spinner("Summarizing document..."):
-                summary = batch_summarize(st.session_state.full_text)
-                st.subheader("📌 Document Summary")
-                st.write(summary)
+        elif mode == "Summarization":
+            if st.button("Summarize Document"):
+                with st.spinner("Summarizing document..."):
+                    summary = batch_summarize(st.session_state.full_text)
+                    st.subheader("📌 Document Summary")
+                    st.write(summary)
