@@ -1,7 +1,6 @@
 import os
 import time
 import random
-import hashlib
 from io import BytesIO
 
 import streamlit as st
@@ -11,8 +10,6 @@ from pptx import Presentation
 from sentence_transformers import SentenceTransformer
 import faiss
 from anthropic import Anthropic, APIStatusError
-from pdf2image import convert_from_bytes
-import easyocr
 import numpy as np
 from PyPDF2 import PdfReader
 from dotenv import load_dotenv
@@ -33,11 +30,9 @@ if not ANTHROPIC_API_KEY:
 client = Anthropic(api_key=ANTHROPIC_API_KEY)
 
 # ---------------------------
-# Embeddings + OCR
+# Embeddings
 # ---------------------------
 embedder = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
-ocr_reader = easyocr.Reader(["en"], gpu=False)
-
 
 # ---------------------------
 # Helpers
@@ -50,28 +45,23 @@ def chunk_text(text, chunk_size=500, overlap=50):
         chunks.append(" ".join(words[i:i + chunk_size]))
     return chunks
 
-
-def ocr_pdf(file_bytes):
-    """OCR fallback for PDFs with no extractable text."""
-    images = convert_from_bytes(file_bytes)
-    text = ""
-    for img in images:
-        text += " ".join([line[1] for line in ocr_reader.readtext(np.array(img))]) + "\n"
-    return text
-
-
 @st.cache_data(show_spinner=False)
 def extract_and_cache_text(file_bytes: bytes, file_name: str):
     """Extract text from file and cache result by file content hash."""
+
+    # PDF handling (no OCR)
     if file_name.endswith(".pdf"):
         try:
             reader = PdfReader(BytesIO(file_bytes))
-            text = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
+            text = "\n".join(
+                [page.extract_text() for page in reader.pages if page.extract_text()]
+            )
             if text.strip():
                 return text
+            else:
+                return "⚠️ No extractable text found in this PDF. OCR is disabled on Streamlit Cloud."
         except Exception:
-            pass
-        return ocr_pdf(file_bytes)
+            return "⚠️ Could not read PDF."
 
     elif file_name.endswith(".docx"):
         doc = docx.Document(BytesIO(file_bytes))
@@ -99,7 +89,6 @@ def extract_and_cache_text(file_bytes: bytes, file_name: str):
 
     return ""
 
-
 @st.cache_resource(show_spinner=False)
 def build_faiss_index(text: str):
     """Build FAISS index & cache it for the text hash."""
@@ -110,13 +99,11 @@ def build_faiss_index(text: str):
     index.add(embeddings)
     return chunks, index
 
-
 def search_chunks(query, chunks, index, top_k=3):
     """Retrieve most relevant chunks."""
     query_emb = embedder.encode([query], convert_to_numpy=True)
     distances, indices = index.search(query_emb, top_k)
     return [chunks[i] for i in indices[0]]
-
 
 # ---------------------------
 # Claude API Helper
@@ -147,7 +134,6 @@ def query_claude(client, model, messages, max_tokens=1000, retries=3, system=Non
     st.error("🚨 Claude API is still overloaded after multiple retries. Try again later.")
     return None
 
-
 # ---------------------------
 # Summarization (Batched)
 # ---------------------------
@@ -177,7 +163,6 @@ def batch_summarize(text, batch_size=5):
     )
     return final_summary or "⚠️ Summarization failed."
 
-
 # ---------------------------
 # Streamlit UI
 # ---------------------------
@@ -189,6 +174,9 @@ uploaded_file = st.file_uploader(
     type=["pdf", "docx", "xlsx", "csv", "pptx", "txt"],
     accept_multiple_files=False
 )
+
+# Inform users about OCR limitation
+st.info("⚠️ OCR is disabled on Streamlit Cloud. Only PDFs with extractable text will work.")
 
 if uploaded_file:
     file_bytes = uploaded_file.read()
