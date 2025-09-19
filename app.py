@@ -59,9 +59,9 @@ def extract_and_cache_text(file_bytes: bytes, file_name: str):
             if text.strip():
                 return text
             else:
-                return "⚠️ No extractable text found in this PDF. OCR is disabled on Streamlit Cloud."
+                return None  # No extractable text
         except Exception:
-            return "⚠️ Could not read PDF."
+            return None  # Could not read PDF
 
     elif file_name.endswith(".docx"):
         doc = docx.Document(BytesIO(file_bytes))
@@ -87,7 +87,7 @@ def extract_and_cache_text(file_bytes: bytes, file_name: str):
     elif file_name.endswith(".txt"):
         return file_bytes.decode("utf-8")
 
-    return ""
+    return None
 
 @st.cache_resource(show_spinner=False)
 def build_faiss_index(text: str):
@@ -175,21 +175,19 @@ uploaded_file = st.file_uploader(
     accept_multiple_files=False
 )
 
-# Inform users about OCR limitation
-st.info("⚠️ OCR is disabled on Streamlit Cloud. Only PDFs with extractable text will work.")
-
 if uploaded_file:
     file_bytes = uploaded_file.read()
     text = extract_and_cache_text(file_bytes, uploaded_file.name)
 
-    if text.strip():
+    # If PDF had no extractable text
+    if text is None:
+        st.warning("⚠️ OCR is disabled on Streamlit Cloud. Please upload docs with extractable text.")
+    else:
         chunks, index = build_faiss_index(text)
         st.session_state.chunks = chunks
         st.session_state.index = index
         st.session_state.full_text = text
         st.success("✅ Document processed and indexed successfully!")
-    else:
-        st.error("No text could be extracted from the uploaded file.")
 
 if "chunks" in st.session_state and st.session_state.chunks:
     mode = st.radio("Choose mode:", ["Q&A", "Summarization"])
