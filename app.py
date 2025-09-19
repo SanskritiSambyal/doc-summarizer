@@ -128,16 +128,16 @@ def batch_summarize(text, batch_size=5):
     summaries = []
     for i in range(0, len(chunks), batch_size):
         batch = "\n\n".join(chunks[i:i + batch_size])
-        with st.spinner(f"📄 Summarizing batch {i//batch_size+1}/{(len(chunks)+batch_size-1)//batch_size}..."):
-            response = query_claude(
-                client,
-                "claude-opus-4-1-20250805",
-                messages=[{"role": "user", "content": f"Summarize this section:\n\n{batch}"}],
-                system="You are an AI summarizer."
-            )
-            if response:
-                summaries.append(response)
-            time.sleep(0.5)
+        
+        response = query_claude(
+            client,
+            "claude-opus-4-1-20250805",
+            messages=[{"role": "user", "content": f"Summarize this section:\n\n{batch}"}],
+            system="You are an AI summarizer."
+        )
+        if response:
+            summaries.append(response)
+        time.sleep(0.5)
     combined = "\n".join(summaries)
     final_summary = query_claude(
         client,
@@ -152,7 +152,8 @@ def batch_summarize(text, batch_size=5):
 # ---------------------------
 st.set_page_config(page_title="AI Document Summarizer", layout="wide")
 st.title("📄 AI-Powered Document Summarizer (Claude + RAG)")
-st.caption("Upload your docs and get concise summaries or answers using AI with context-aware search.")
+
+st.markdown('<p style="font-size:18px;">Upload your docs and get concise summaries or answers using AI with context-aware search.</p>', unsafe_allow_html=True)
 
 uploaded_file = st.file_uploader(
     "Upload a document (PDF, DOCX, XLSX, CSV, PPTX, TXT)",
@@ -187,8 +188,9 @@ if uploaded_file:
         # ---------------------------
         # Mode Selection UI
         # ---------------------------
+        st.markdown('<p style="font-size:18px;">What would you like to do?</p>', unsafe_allow_html=True)
         mode_options = ["💬 Ask a Question", "📝 Get Summary"]
-        selected_mode = st.selectbox("What would you like to do?", mode_options)
+        selected_mode = st.selectbox("", mode_options)
 
         # Display selected mode
         st.markdown(f"**Selected Mode:** {selected_mode}")
@@ -197,7 +199,8 @@ if uploaded_file:
         # Q&A Mode
         # ---------------------------
         if selected_mode == "💬 Ask a Question":
-            user_query = st.text_input("🔍 Type your question here:")
+            user_query = st.text_input(label='', placeholder='🔍 Type your question here:')
+            st.markdown('<p style="font-size:16px;">Type your question here:</p>', unsafe_allow_html=True)
             if st.button("Ask Now"):
                 if user_query.strip():
                     ext_name = uploaded_file.name.split(".")[-1].upper()
