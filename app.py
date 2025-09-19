@@ -2,7 +2,7 @@ import os
 import time
 import random
 from io import BytesIO
-
+import torch
 import streamlit as st
 import pandas as pd
 import docx
@@ -31,8 +31,9 @@ client = Anthropic(api_key=ANTHROPIC_API_KEY)
 # ---------------------------
 # Embeddings
 # ---------------------------
-embedder = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
-
+device = "cuda" if torch.cuda.is_available() else "cpu"
+embedder = SentenceTransformer("all-MiniLM-L6-v2")
+embedder.to(device)
 # ---------------------------
 # Helpers
 # ---------------------------
