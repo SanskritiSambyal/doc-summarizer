@@ -2,6 +2,7 @@ import os
 import time
 import random
 from io import BytesIO
+import glob
 import streamlit as st
 import pandas as pd
 import docx
@@ -55,7 +56,7 @@ def chunk_text(text, chunk_size=500, overlap=50):
     return chunks
 
 @st.cache_data(show_spinner=False)
-def extract_and_cache_text(file_bytes: bytes, file_name: str):
+def extract_text_from_file(file_bytes: bytes, file_name: str):
     ext = file_name.split(".")[-1].lower()
     try:
         if ext == "pdf":
@@ -65,11 +66,8 @@ def extract_and_cache_text(file_bytes: bytes, file_name: str):
         elif ext == "docx":
             doc = docx.Document(BytesIO(file_bytes))
             return "\n".join([para.text for para in doc.paragraphs])
-        elif ext == "xlsx":
-            df = pd.read_excel(BytesIO(file_bytes))
-            return df.to_string()
-        elif ext == "csv":
-            df = pd.read_csv(BytesIO(file_bytes))
+        elif ext in ["xlsx", "csv"]:
+            df = pd.read_excel(BytesIO(file_bytes)) if ext=="xlsx" else pd.read_csv(BytesIO(file_bytes))
             return df.to_string()
         elif ext == "pptx":
             prs = Presentation(BytesIO(file_bytes))
@@ -131,6 +129,9 @@ def query_claude(client, model, messages, max_tokens=1000, retries=3, system=Non
     st.warning("🚨 Claude API is still overloaded. Please try again later.")
     return None
 
+# ---------------------------
+# Batch Summarizer
+# ---------------------------
 def batch_summarize(text, batch_size=5, use_web=False):
     chunks = chunk_text(text)
     summaries = []
@@ -177,7 +178,7 @@ def batch_summarize(text, batch_size=5, use_web=False):
 # ---------------------------
 # Streamlit UI
 # ---------------------------
-st.set_page_config(page_title="AI Document Summarizer", layout="wide")
+st.set_page_config(page_title="AI Document Summarizer & NHAI Tenders", layout="wide")
 
 st.markdown("""
 <style>
@@ -193,136 +194,261 @@ body, .stApp, .stTextInput>div>div>input { font-size: 17px; }
 
 st.markdown("""<style>h1 { margin-top: -70px !important; margin-bottom: 12px !important; }</style>""", unsafe_allow_html=True)
 
-st.title("📄 AI-Powered Document Summarizer & Chatbot (Claude + RAG)")
+
+st.title("📄 Document & Tender AI Assistant – Powered by Claude & RAG")
+
+# ---------- Top-Level Mode Selector ----------
+st.markdown('<div class="compact-label">Select Application Mode</div>', unsafe_allow_html=True)
+app_mode = st.selectbox(
+    "",
+    ["Document Summarizer", "NHAI Tender Assistant"],
+    label_visibility="collapsed"
+)
 
 col_sidebar, col_main = st.columns([1,3])
 
-# ---------- Sidebar ----------
-with col_sidebar:
-    st.markdown('<div class="compact-label">Upload Document</div>', unsafe_allow_html=True)
-    uploaded_file = st.file_uploader(
-        "file_uploader",
-        type=["pdf","docx","xlsx","csv","pptx","txt"],
-        label_visibility="collapsed"
-    )
-    text_extracted = False
-    if uploaded_file:
-        file_bytes = uploaded_file.read()
-        text = extract_and_cache_text(file_bytes, uploaded_file.name)
-        if text:
-            text_extracted = True
-            chunks, index = build_faiss_index(text)
-            st.session_state.chunks = chunks
-            st.session_state.index = index
-            st.session_state.full_text = text
-            ext = uploaded_file.name.split(".")[-1].lower()
-            messages = {
-                "pdf": "✅ PDF processed successfully!",
-                "docx": "✅ Word document processed successfully!",
-                "xlsx": "✅ Spreadsheet processed successfully!",
-                "csv": "✅ Spreadsheet processed successfully!",
-                "pptx": "✅ Presentation processed successfully!",
-                "txt": "✅ Text file processed successfully!"
-            }
-            st.success(messages.get(ext, "✅ Document processed successfully!"))
-        else:
-            st.warning("⚠️ OCR is disabled on Streamlit Cloud. Please upload documents with extractable text.")
-    if text_extracted:
-        st.markdown('<div class="compact-label">Select Mode</div>', unsafe_allow_html=True)
-        selected_mode = st.selectbox(
-            "mode_selector",
-            ["💬 Ask a Question","📝 Get Summary"],
-            key="selected_mode",
+# =============================
+# Document Summarizer Module
+# =============================
+if app_mode=="Document Summarizer":
+    with col_sidebar:
+        st.markdown('<div class="compact-label">Upload Document</div>', unsafe_allow_html=True)
+        uploaded_file = st.file_uploader(
+            "file_uploader",
+            type=["pdf","docx","xlsx","csv","pptx","txt"],
             label_visibility="collapsed"
         )
-        use_web = st.checkbox(
-            "🌐 Include general knowledge if needed",
-            value=False,
-            help="If enabled, answers and summaries may use Claude's general knowledge."
-        )
+        text_extracted = False
+        if uploaded_file:
+            file_bytes = uploaded_file.read()
+            text = extract_text_from_file(file_bytes, uploaded_file.name)
+            if text:
+                text_extracted = True
+                chunks, index = build_faiss_index(text)
+                st.session_state.chunks = chunks
+                st.session_state.index = index
+                st.session_state.full_text = text
+                ext = uploaded_file.name.split(".")[-1].lower()
+                messages = {
+                    "pdf": "✅ PDF processed successfully!",
+                    "docx": "✅ Word document processed successfully!",
+                    "xlsx": "✅ Spreadsheet processed successfully!",
+                    "csv": "✅ Spreadsheet processed successfully!",
+                    "pptx": "✅ Presentation processed successfully!",
+                    "txt": "✅ Text file processed successfully!"
+                }
+                st.success(messages.get(ext, "✅ Document processed successfully!"))
+            else:
+                st.warning("⚠️ OCR is disabled on Streamlit Cloud. Please upload documents with extractable text.")
 
-        # ---------- Collapsible History ----------
-        with st.expander("🕘 History"):
-            if "qa_history" not in st.session_state:
-                st.session_state.qa_history = []
-            if "summary_history" not in st.session_state:
-                st.session_state.summary_history = []
-            with st.expander("🗨️ Q&A History"):
-                if st.session_state.qa_history:
-                    for entry in reversed(st.session_state.qa_history[-5:]):
-                        st.markdown(
-                            f'<div class="output-box"><b>Q:</b> {entry["query"]}<br><b>A:</b> {entry["answer"]}</div>',
-                            unsafe_allow_html=True
-                        )
-                else:
-                    st.info("No Q&A history yet.")
-            with st.expander("📝 Summary History"):
-                if st.session_state.summary_history:
-                    for i, s in enumerate(reversed(st.session_state.summary_history[-5:]), 1):
-                        st.markdown(
-                            f'<div class="output-box"><b>Summary {i}:</b><br>{s}</div>',
-                            unsafe_allow_html=True
-                        )
-                else:
-                    st.info("No summaries yet.")
+        if text_extracted:
+            st.markdown('<div class="compact-label">Select Mode</div>', unsafe_allow_html=True)
+            selected_mode = st.selectbox("mode_selector", ["💬 Ask a Question","📝 Get Summary"], key="selected_mode", label_visibility="collapsed")
+            use_web = st.checkbox("🌐 Include general knowledge if needed", value=False, help="If enabled, answers and summaries may use Claude's general knowledge.")
 
-# ---------- Main ----------
-with col_main:
-    if text_extracted:
-        if selected_mode=="💬 Ask a Question":
-            st.markdown('<div class="compact-label">Your Question</div>', unsafe_allow_html=True)
-            user_query = st.text_input("question_input", placeholder="Type your question here...", label_visibility="collapsed")
-            ask_disabled = user_query.strip()==""
-            col1,col2 = st.columns([0.25,0.75])
-            with col1:
-                ask_clicked = st.button("Ask Now", disabled=ask_disabled)
-            if ask_clicked:
-                with st.spinner("🧠 Searching for answers in your {ext}..."):
-                    try:
+            # ---------- Collapsible History ----------
+            with st.expander("🕘 History"):
+                if "qa_history" not in st.session_state:
+                    st.session_state.qa_history = []
+                if "summary_history" not in st.session_state:
+                    st.session_state.summary_history = []
+
+                with st.expander("🗨️ Q&A History"):
+                    if st.session_state.qa_history:
+                        for entry in reversed(st.session_state.qa_history[-5:]):
+                            st.markdown(f'<div class="output-box"><b>Q:</b> {entry["query"]}<br><b>A:</b> {entry["answer"]}</div>', unsafe_allow_html=True)
+                    else:
+                        st.info("No Q&A history yet.")
+
+                with st.expander("📝 Summary History"):
+                    if st.session_state.summary_history:
+                        for i, s in enumerate(reversed(st.session_state.summary_history[-5:]), 1):
+                            st.markdown(f'<div class="output-box"><b>Summary {i}:</b><br>{s}</div>', unsafe_allow_html=True)
+                    else:
+                        st.info("No summaries yet.")
+
+    # ---------- Main ----------
+    with col_main:
+        if text_extracted:
+            if selected_mode=="💬 Ask a Question":
+                st.markdown('<div class="compact-label">Your Question</div>', unsafe_allow_html=True)
+                user_query = st.text_input("question_input", placeholder="Type your question here...", label_visibility="collapsed")
+                ask_disabled = user_query.strip()=="" 
+                if st.button("Ask Now", disabled=ask_disabled):
+                    with st.spinner(f"🧠 Searching for answers in your {ext}..."):
                         context_chunks = search_chunks(user_query, st.session_state.chunks, st.session_state.index)
                         context_text = "\n".join(context_chunks) if context_chunks else ""
                         if use_web:
-                            if context_text:
-                                prompt = (
-                                    f"Context (from the uploaded document):\n{context_text}\n\n"
-                                    f"Question: {user_query}\n\n"
-                                    "Instructions: Answer using document first. If the document has no relevant info, you may answer from general knowledge. "
-                                    "Do not omit document info if present."
-                                )
-                            else:
-                                prompt = (
-                                    f"Question: {user_query}\n\n"
-                                    "Instructions: No relevant document information available. Answer using general knowledge."
-                                )
-                            system_msg = "Answer using document and general knowledge when necessary."
+                            prompt = f"Context:\n{context_text}\n\nQuestion: {user_query}\nInstructions: Answer using document first, then general knowledge if needed."
+                            system_msg = "Answer using document and general knowledge if necessary."
                         else:
                             prompt = f"Context:\n{context_text}\n\nQuestion: {user_query}"
-                            system_msg = "Answer based only on the provided document."
-                        response = query_claude(
-                            client,
-                            "claude-opus-4-1-20250805",
-                            messages=[{"role":"user","content":prompt}],
-                            system=system_msg
-                        )
+                            system_msg = "Answer strictly based on document."
+                        response = query_claude(client, "claude-opus-4-1-20250805", messages=[{"role":"user","content":prompt}], system=system_msg)
                         if response:
                             st.session_state.qa_history.append({"query":user_query,"answer":response})
                             st.markdown(f'<div class="output-box"><b>🤖 Answer:</b><br>{response}</div>', unsafe_allow_html=True)
                         else:
-                            st.warning("⚠️ Could not fetch an answer. Try again or reload the app.")
-                    except Exception:
-                        st.warning("⚠️ Something went wrong. Please reload and try again.")
-        elif selected_mode=="📝 Get Summary":
-            col1,col2 = st.columns([0.25,0.75])
-            with col1:
-                summary_clicked = st.button("Generate Summary")
-            if summary_clicked:
-                with st.spinner(f"📄 Creating a concise summary of your {ext}..."):
-                    try:
+                            st.warning("⚠️ Could not fetch an answer. Try again.")
+
+            elif selected_mode=="📝 Get Summary":
+                if st.button("Generate Summary"):
+                    with st.spinner(f"📝 Generating a concise summary of your {ext}..."):
                         summary = batch_summarize(st.session_state.full_text, use_web=use_web)
                         st.session_state.summary_history.append(summary)
                         st.markdown(f'<div class="output-box"><b>📌 Document Summary:</b><br>{summary}</div>', unsafe_allow_html=True)
+
+
+# =============================
+# NHAI Tender Assistant Module (FAISS + RAG)
+# =============================
+if app_mode == "NHAI Tender Assistant":
+    with col_sidebar:
+        # Tender Source
+        st.markdown('<div class="compact-label">Select Tender Source</div>', unsafe_allow_html=True)
+        tender_source = st.selectbox(
+            "tender_source_select",
+            ["Use Existing Tender", "Upload New Tender"],
+            label_visibility="collapsed"
+        )
+
+        selected_tender_name = None
+        uploaded_tender_files = None
+        tender_key = None
+
+        # Initialize tender_history dict if not present
+        if "tender_history" not in st.session_state:
+            st.session_state.tender_history = {}
+
+        # Select Existing Tender
+        if tender_source == "Use Existing Tender":
+            st.markdown('<div class="compact-label">Select Tender</div>', unsafe_allow_html=True)
+            tender_folders = [f for f in os.listdir("tenders") if os.path.isdir(os.path.join("tenders", f))]
+            selected_tender_name = st.selectbox(
+                "Select Tender",
+                ["-- Select Tender --"] + tender_folders,
+                index=0,
+                label_visibility="collapsed"
+            )
+            if selected_tender_name != "-- Select Tender --":
+                tender_key = selected_tender_name
+        else:
+            # Upload New Tender
+            st.markdown('<div class="compact-label">Upload Tender PDF(s)</div>', unsafe_allow_html=True)
+            uploaded_tender_files = st.file_uploader(
+                "",
+                type=["pdf"],
+                accept_multiple_files=True,
+                label_visibility="collapsed"
+            )
+            if uploaded_tender_files:
+                tender_key = "uploaded_tender"
+
+        # Initialize session state for this tender_key if it exists
+        if tender_key and tender_key not in st.session_state.tender_history:
+            st.session_state.tender_history[tender_key] = {
+                "full_text": "",
+                "chunks": [],
+                "index": None,
+                "summary": None,
+                "qa": []
+            }
+
+    # ----------------------------
+    # Main Column
+    # ----------------------------
+    with col_main:
+        full_text = ""
+        text_extracted = False
+
+        if tender_key:
+            # Extract text from existing tenders
+            if selected_tender_name and tender_source == "Use Existing Tender":
+                folder_path = os.path.join("tenders", selected_tender_name)
+                for fpath in glob.glob(os.path.join(folder_path, "*.pdf")):
+                    try:
+                        with open(fpath, "rb") as f:
+                            content = extract_text_from_file(f.read(), fpath)
+                            if content and content.strip():
+                                full_text += "\n\n" + content
+                                text_extracted = True
                     except Exception:
-                        st.warning("⚠️ Could not generate summary. Please reload and try again.")
+                        pass
+
+            # Extract text from uploaded PDFs
+            if uploaded_tender_files:
+                for file in uploaded_tender_files:
+                    try:
+                        content = extract_text_from_file(file.read(), file.name)
+                        if content and content.strip():
+                            full_text += "\n\n" + content
+                            text_extracted = True
+                    except Exception:
+                        pass
+
+            # Show OCR warning ONLY if user tried to provide a tender but no text found
+            if not text_extracted:
+                st.warning("⚠️ OCR is disabled on Streamlit Cloud. Please upload documents with extractable text.")
+                st.stop()
+
+            # Save text in session state
+            st.session_state.tender_history[tender_key]["full_text"] = full_text
+
+            # Build FAISS index only once
+            if not st.session_state.tender_history[tender_key]["index"]:
+                chunks, index = build_faiss_index(full_text)
+                st.session_state.tender_history[tender_key]["chunks"] = chunks
+                st.session_state.tender_history[tender_key]["index"] = index
+
+            # Generate summary only if not already done
+            if not st.session_state.tender_history[tender_key]["summary"]:
+                with st.spinner("📝 Generating tender summary..."):
+                    prompt = f"Extract key tender details and create a professional summary:\n\n{full_text[:20000]}"
+                    summary = query_claude(
+                        client,
+                        "claude-opus-4-1-20250805",
+                        messages=[{"role": "user", "content": prompt}],
+                        system="You are an expert summarizer for NHAI tenders."
+                    )
+                    st.session_state.tender_history[tender_key]["summary"] = summary
+
+            # Display summary
+            st.markdown('<div class="tender-section-title">📌 Key Tender Information & Summary</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="output-box">{st.session_state.tender_history[tender_key]["summary"]}</div>', unsafe_allow_html=True)
+
+            # ----------------------------
+            # Ask questions ONLY if summary is ready
+            # ----------------------------
+            st.markdown('<div class="tender-qa-title">💬 Ask Question</div>', unsafe_allow_html=True)
+            tender_query = st.text_input(
+                "tender_question_input",
+                placeholder="Type your question here...",
+                label_visibility="collapsed"
+            )
+
+            if st.button("Ask Question", key="ask_tender_btn") and tender_query.strip():
+                # Check history first
+                existing = [q for q in st.session_state.tender_history[tender_key]["qa"] if q["query"] == tender_query]
+                if existing:
+                    answer = existing[0]["answer"]
+                else:
+                    chunks = st.session_state.tender_history[tender_key]["chunks"]
+                    index = st.session_state.tender_history[tender_key]["index"]
+                    relevant_chunks = search_chunks(tender_query, chunks, index)
+                    context_text = "\n".join(relevant_chunks) if relevant_chunks else full_text[:2000]
+
+                    prompt = f"Answer the following question strictly based on the tender document:\n\n{context_text}\n\nQuestion:\n{tender_query}"
+                    answer = query_claude(
+                        client,
+                        "claude-opus-4-1-20250805",
+                        messages=[{"role": "user", "content": prompt}],
+                        system="You are an expert answering questions from tender documents."
+                    )
+                    st.session_state.tender_history[tender_key]["qa"].append({"query": tender_query, "answer": answer})
+
+                st.markdown(f'<div class="output-box"><b>🤖 Answer:</b> {answer}</div>', unsafe_allow_html=True)
+
+
 
 # ---------- Fixed Footer Disclaimer ----------
 st.markdown(
